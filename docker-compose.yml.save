@@ -1,0 +1,56 @@
+version: '3'
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: gitea
+      POSTGRES_PASSWORD: gitea_pass
+      POSTGRES_DB: gitea
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+
+  gitea:
+    image: gitea/gitea:latest
+    depends_on:
+      - postgres
+    environment:
+      DB_TYPE: postgres
+      DB_HOST: postgres
+      DB_NAME: gitea
+      DB_USER: gitea
+      DB_PASSWD: gitea_pass
+    volumes:
+      - ./data/gitea:/data
+    ports:
+      - "3000:3000"
+      - "2222:22"
+    deploy:
+      replicas:1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.gitea.rule=Host(`gitea.localhost`)"
+        - "traefik.http.services.gitea.loadbalancer.server.port=3000"
+        - "traefik.http.routers.gitea.entrypoints=web"
+
+  traefik:
+    image: traefik:v3.3
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"  # HTTP
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - gitea_network
+    deploy:
+      replicas: 1  # Only one Traefik instance usually
+      placement:
+        constraints:
+          - "node.role == manager"  # Run Traefik on the manager node
+    labels:
+      - "traefik.enable=true"
