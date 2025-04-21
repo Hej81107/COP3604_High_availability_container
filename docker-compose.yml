@@ -26,39 +26,84 @@ services:
       DB_NAME: gitea
       DB_USER: gitea
       DB_PASSWD: gitea_pass
+      GITEA__queue__TYPE: redis
+      GITEA__queue__CONN_STR: "redis://redis:6379/0"
+      GITEA__queue__QUEUE_NAME: "_queue"
+      GITEA__queue__SET_NAME: "_unique"
+   
+ 
       #ROOT_URL: "http://localhost:85"
     volumes:
       - gitea_config:/data
     networks:
       - gitea_network
     ports:
-      - "3000"
+      - "85:3000"
     expose:
-      - "3000"
+      - "85"
     deploy:
       replicas: 3
       labels:
-       - "swarm.autoscale=true"
-       - "swarm.autoscale.min = 3"
-       - "swarm.autoscale.max = 6"
-       - "swarm.autoscale.percentage-max=1"
-      # - "swarm.autoscale.percentage-min=1"
+        - "swarm.autoscale=true"
+        - "swarm.autoscale.min = 3"
+        - "swarm.autoscale.max = 6"
+        - "swarm.autoscale.percentage-max=2"
+        #- "swarm.autoscale.percentage-min=1"
+        - "com.df.notify=true"
+        - "com.df.alertName=service_scale_up"
+        - "com.df.alertIf=@service_replicas < 6 && @node_cpu_usage > 80"
+        - "com.df.alertFor=30s"
+        - "com.df.alertLabels.scale=up"
+        - "com.df.alertName.2=service_scale_down"
+        - "com.df.alertIf.2=@service_replicas > 1 && @node_cpu_usage < 20"
+        - "com.df.alertFor.2=2m"
+        - "com.df.alertLabels.2.scale=down"
       resources:
         limits:
           cpus: '1.0'
-       # - "traefik.enable=true"
-       #- "traefik.http.routers.gitea.rule=PathPrefix(`/`)"
-       # - "traefik.http.routers.gitea.rule=Host('localhost')"
-       # - "traefik.http.routers.gitea.entrypoints=web"
-       # - "traefik.http.services.gitea.loadbalancer.server.port=3000"
-       # - "traefik.http.middlewares.gitea-stripprefix.stripprefix.prefixes=/git"
-       # - "traefik.http.routers.gitea.middlewares=gitea-stripprefix"
+#    healthcheck:
+ #      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+  #     interval: 5s
+   #    timeout: 5s
+    #   retries: 5
+  redis:
+    image: redis:6
+    networks:
+     - gitea_network
+    volumes:
+     - redis_data:/data
+    deploy:
+       replicas: 1
+  
+  portainer:
+    image: portainer/portainer-ce:latest
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    ports:
+      - "9000:9000"
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+ 
+#  nginx:
+#    image: nginx:alpine
+#    container_name: nginx-gitea
+#    ports:
+#      - "85:80"
+#    configs:
+#      - source: nginx_config
+#        target: /etc/nginx/nginx.conf
+#    networks:
+#      - gitea_network 
+
 
   autoscaler:
     image: eluki/swarm-service-autoscaler:latest
     environment:
       - AUTOSCALER_DNSNAME=tasks.autoscaler
-      - AUTOSCALER_INTERVAL=60  # in seconds
+      - AUTOSCALER_INTERVAL=60
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
@@ -72,21 +117,6 @@ services:
       options:
         max-size: "3m"
         max-file: "3"
-
-
-
-  nginx:
-    image: nginx:alpine
-    container_name: nginx-gitea
-    ports:
-      - "85:80"
-    configs:
-      - source: nginx_config
-        target: /etc/nginx/nginx.conf
-    networks:
-      - gitea_network 
-
-
 # traefik:
   #  image: traefik:v3
        
@@ -117,10 +147,16 @@ services:
 configs:
   nginx_config:
     file: ./nginx.conf
-volumes:
-  gitea_data:
-  gitea_config:
 
 networks:
   gitea_network:
     driver: overlay
+
+#Ensures containers do not try to create their own temporary volumes
+volumes:
+  gitea_data:
+    external: true
+  gitea_config:
+    external: true
+  redis_data:
+  portainer_data:
